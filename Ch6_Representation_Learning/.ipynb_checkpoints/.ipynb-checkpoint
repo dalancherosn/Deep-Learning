@@ -1,0 +1,530 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## The CBOW Architecture"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Build the corpus vocabulary"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "import re\n",
+    "import nltk\n",
+    "import matplotlib.pyplot as plt\n",
+    "pd.options.display.max_colwidth = 200\n",
+    "%matplotlib inline"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "corpus = ['The sky is blue and beautiful,',\n",
+    "         'Love this blue and beautiful sky!',\n",
+    "         'The quick brown fox jumps over the lazy dog.',\n",
+    "         \"A king's breakfast has sausages, ham, bacon, eggs, toast, and beans\",\n",
+    "         'I love green eggs, ham, sausages and bacon!',\n",
+    "         'The brown fox is quick anf the blue dog is lazy!',\n",
+    "         'The sky is very blue and the sky is very beautiful today',\n",
+    "         'The dog is lazy but the brown fox is quick!']\n",
+    "labels = ['weather', 'weather', 'animals', 'food', 'food', 'animals', 'weather', 'animals']\n",
+    "\n",
+    "corpus = np.array(corpus)\n",
+    "corpus_df = pd.DataFrame({'Document' : corpus,\n",
+    "                         'Category' : labels})\n",
+    "corpus_df = corpus_df[['Document', 'Category']]\n",
+    "corpus_df"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "wpt = nltk.WordPunctTokenizer()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "stop_words = nltk.corpus.stopwords.words('english')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def normalize_document(doc):\n",
+    "    # lower case and remove special characters\\whitespaces\n",
+    "    doc = re.sub(r'[^a-zA-Z\\s]', '', doc, re.I|re.A)\n",
+    "    doc = doc.lower()\n",
+    "    doc = doc.strip()\n",
+    "    \n",
+    "    # tokenize document\n",
+    "    tokens = wpt.tokenize(doc)\n",
+    "    \n",
+    "    # filter stopwords out of document\n",
+    "    filtered_tokens = [token for token in tokens if token not in stop_words]\n",
+    "    \n",
+    "    # re-create document from filtered tokens\n",
+    "    doc = ' '.join(filtered_tokens)\n",
+    "    \n",
+    "    return doc"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "normalize_corpus = np.vectorize(normalize_document)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "norm_corpus = normalize_corpus(corpus)\n",
+    "norm_corpus"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from nltk.corpus import gutenberg\n",
+    "from string import punctuation"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "bible = gutenberg.sents('bible-kjv.txt')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "remove_terms = punctuation + '0123456789'"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "norm_bible = [[word.lower() for word in sent if word not in remove_terms] for sent in bible]\n",
+    "norm_bible = [' '.join(tok_sent) for tok_sent in norm_bible]\n",
+    "norm_bible = filter(None, normalize_corpus(norm_bible))\n",
+    "norm_bible = [tok_sent for tok_sent in norm_bible if len(tok_sent.split()) > 2]\n",
+    "\n",
+    "print('Total lines:', len(bible))\n",
+    "print('\\nSample line:', bible[10])\n",
+    "print('\\nProcessed line:', norm_bible[10])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Implementing the Continuous Bag of Words (CBOW) model"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Build the corpus vocabulary"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from keras.preprocessing import text\n",
+    "from keras.utils import np_utils\n",
+    "from keras.preprocessing import sequence"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "tokenizer = text.Tokenizer()\n",
+    "tokenizer.fit_on_texts(norm_bible)\n",
+    "word2id = tokenizer.word_index"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# build vocabulary of unique words\n",
+    "word2id['PAD'] = 0\n",
+    "id2word = {v : k for k, v in word2id.items()}\n",
+    "wids = [[word2id[w] for w in text.text_to_word_sequence(doc)] for doc in norm_bible]\n",
+    "\n",
+    "vocab_size = len(word2id)\n",
+    "embed_size = 100\n",
+    "window_size = 2 # context window size\n",
+    "\n",
+    "print('Vocabulary Size:', vocab_size)\n",
+    "print('Vocabulary Sample:', list(word2id.items())[:10])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Build a CBOW (contex, target) generator"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def generate_context_word_pairs(corpus, window_size, vocab_size):\n",
+    "    context_length = window_size * 2\n",
+    "    for words in corpus:\n",
+    "        sentence_length = len(words)\n",
+    "        for index, word in enumerate(words):\n",
+    "            context_words = []\n",
+    "            label_word = []\n",
+    "            start = index - window_size\n",
+    "            end = index + window_size + 1\n",
+    "            \n",
+    "            context_words.append([words[i]\n",
+    "                                for i in range(start, end)\n",
+    "                                if 0 <= i < sentence_length\n",
+    "                                 and i != index])\n",
+    "            label_word.append(word)\n",
+    "            \n",
+    "            x = sequence.pad_sequences(context_words, maxlen = context_length)\n",
+    "            y = np_utils.to_categorical(label_word, vocab_size)\n",
+    "            yield(x, y)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Test this out for some examples\n",
+    "\n",
+    "i = 0\n",
+    "for x, y in generate_context_word_pairs(corpus = wids, window_size = window_size, vocab_size = vocab_size):\n",
+    "    if 0 not in x[0]:\n",
+    "        print('Context (X):', [id2word[w] for w in x[0]], '-> Target (Y):', id2word[np.argwhere(y[0])[0][0]])\n",
+    "        \n",
+    "        if i == 10:\n",
+    "            break\n",
+    "        i += 1"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import keras.backend as K\n",
+    "from keras.models import Sequential\n",
+    "from keras.layers import Dense, Embedding, Lambda"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# bulld CBOW architecture\n",
+    "cbow = Sequential()\n",
+    "cbow.add(Embedding(input_dim = vocab_size, output_dim = embed_size, input_length = window_size * 2))\n",
+    "cbow.add(Lambda(lambda x: K.mean(x, axis = 1), output_shape = (embed_size,)))\n",
+    "cbow.add(Dense(vocab_size, activation = 'softmax'))\n",
+    "cbow.compile(loss = 'categorical_crossentropy', optimizer = 'rmsprop')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# view model summary\n",
+    "print(cbow.summary())\n",
+    "\n",
+    "# visualize model structure\n",
+    "from IPython.display import SVG\n",
+    "from keras.utils.vis_utils import model_to_dot\n",
+    "\n",
+    "SVG(model_to_dot(cbow, show_shapes = True, show_layer_names = False,\n",
+    "                rankdir = 'TB').create(prog = 'dot', format = 'svg'))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Train the model"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "for epoch in range(1, 6):\n",
+    "    loss = 0.0\n",
+    "    i = 0\n",
+    "    for x, y in generate_context_word_pairs(corpus = wids, window_size = window_size, vocab_size = vocab_size):\n",
+    "        i += 1\n",
+    "        loss += cbow.train_on_batch(x, y)\n",
+    "        if i % 100000 == 0:\n",
+    "            print('Processed {} (context, word) pairs'.format(i))\n",
+    "            \n",
+    "print('Epoch:', epoch, '\\tLoss:', loss)\n",
+    "print()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "weights = cbow.get_weights()[0]\n",
+    "weights = weights[1:]\n",
+    "print(weights.shape)\n",
+    "\n",
+    "pd.DataFrame(weights, index = list(id2word.values())[1:]).head()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from sklearn.metrics.pairwise import euclidean_distances\n",
+    "\n",
+    "# compute pairwise distance matrix\n",
+    "distance_matrix = euclidean_distances(weights)\n",
+    "print(distance_matrix.shape)\n",
+    "\n",
+    "#view contextuality similar words\n",
+    "similar_words = {search_term : [id2word[idx] for idx in distance_matrix[word2id[search_term] - 1].argsort()[1 : 6] + 1]\n",
+    "                for search_term in ['god', 'jesus', 'noah', 'egypt', 'john', 'gospel', 'moses', 'famine']}\n",
+    "\n",
+    "similar_words"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## The Skip Gram model"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Build the corpus vocabulary"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from keras.preprocessing import text\n",
+    "\n",
+    "tokenizer = text.Tokenizer()\n",
+    "tokenizer.fit_on_texts(norm_bible)\n",
+    "\n",
+    "word2id = tokenizer.word_index\n",
+    "id2word = {v : k for k, v in word2id.items()}\n",
+    "\n",
+    "vocab_size = len(word2id) + 1\n",
+    "embed_size = 100\n",
+    "\n",
+    "wids = [[word2id[w] for w in text.text_to_word_sequence(doc)] for doc in norm_bible]\n",
+    "print('Vocabulary Size:', vocab_size)\n",
+    "print('Vocabulary Sample:', list(word2id.items())[:10])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from keras.preprocessing.sequence import skipgrams\n",
+    "\n",
+    "# generate skip-grams\n",
+    "skip_grams = [skipgrams(wid, vocabulary_size = vocab_size, window_size = 10) for wid in wids]\n",
+    "\n",
+    "# view sample skip-grams\n",
+    "pairs, labels = skip_grams[0][0], skip_grams[0][1]\n",
+    "for i in range(10):\n",
+    "    print(\"({:s} ({:d}), {:s} ({:d})) -> {:d}\".format(\n",
+    "    id2word[pairs[i][0]], pairs[i][0],\n",
+    "    id2word[pairs[i][1]], pairs[i][1],\n",
+    "    labels[i]))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Build the skip-gram model architecture"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from keras.layers import Concatenate\n",
+    "from keras.layers.core import Dense, Reshape\n",
+    "from keras.layers.embeddings import Embedding\n",
+    "from keras.models import Sequential\n",
+    "from keras import Model\n",
+    "\n",
+    "# build skip-gram architecture\n",
+    "word_model = Sequential()\n",
+    "word_model.add(Embedding(vocab_size, embed_size,\n",
+    "                        embeddings_initializer = 'glorot_uniform',\n",
+    "                        input_length = 1))\n",
+    "word_model.add(Reshape((embed_size,)))\n",
+    "\n",
+    "context_model = Sequential()\n",
+    "context_model.add(Embedding(vocab_size, embed_size,\n",
+    "                           embeddings_initializer = 'glorot_uniform',\n",
+    "                           input_length = 1))\n",
+    "context_model.add(Reshape((embed_size,)))\n",
+    "\n",
+    "model = Concatenate(axis = 1)([word_model.output, context_model.output])\n",
+    "model = Dense(1, kernel_initializer = 'glorot_uniform', activation = 'sigmoid')(model)\n",
+    "\n",
+    "model = Model([word_model.input, context_model.input], model)\n",
+    "\n",
+    "model.compile(loss = 'mean_squared_error', optimizer = 'rmsprop')\n",
+    "\n",
+    "# view model summary\n",
+    "print(model.summary())\n",
+    "\n",
+    "# visualize model structure\n",
+    "from IPython.display import SVG\n",
+    "from keras.utils.vis_utils import model_to_dot\n",
+    "\n",
+    "SVG(model_to_dot(model, show_shapes = True, show_layer_names = False,\n",
+    "                rankdir = 'TB').create(prog = 'dot', format = 'svg'))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Train the model"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "for epoch in range(1, 6):\n",
+    "    loss = 0\n",
+    "    for i, elem in enumerate(skip_grams):\n",
+    "        pair_first_elem = np.array(list(zip(*elem[0]))[0], dtype = 'int32')\n",
+    "        pair_second_elem = np.array(list(zip(*elem[0]))[1], dtype = 'int32')\n",
+    "        labels = np.array(elem[1], dtype = 'int32')\n",
+    "        X = [pair_first_elem, pair_second_elem]\n",
+    "        Y = labels\n",
+    "        if i % 10000 == 0:\n",
+    "            print('Processed {} (skip_first, skip_second, relevance) pairs'.format(i))\n",
+    "        loss += model.train_on_batch(X, Y)\n",
+    "        \n",
+    "    print('Epoch:', epoch, 'Loss:', loss)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.7.7"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
